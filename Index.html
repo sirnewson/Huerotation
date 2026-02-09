@@ -18,14 +18,12 @@
         import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, deleteDoc, collection, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Resolve Firebase Configuration with fallbacks for local/hosting environments
+        // Resolve Firebase Configuration with fallbacks
         let firebaseConfig = {};
         try {
-            // Attempt to use environment-injected config first
             if (typeof __firebase_config !== 'undefined') {
                 firebaseConfig = JSON.parse(__firebase_config);
             } else {
-                // Fallback to user-provided config for hosting/local preview
                 firebaseConfig = {
                     apiKey: "AIzaSyC5BTQNFA3z048W_jQlici8hwcHyMkjqLo",
                     authDomain: "huerotation.firebaseapp.com",
@@ -36,7 +34,6 @@
                 };
             }
         } catch (e) {
-            console.error("Config parse error, using hardcoded fallback.");
             firebaseConfig = {
                 apiKey: "AIzaSyC5BTQNFA3z048W_jQlici8hwcHyMkjqLo",
                 authDomain: "huerotation.firebaseapp.com",
@@ -70,7 +67,6 @@
                 }
             } catch (error) {
                 console.error("Auth failed:", error);
-                // Last ditch effort: ensure we attempt anonymous sign in if custom token fails
                 try { await signInAnonymously(auth); } catch(e) {}
             }
         };
@@ -80,7 +76,12 @@
         onAuthStateChanged(auth, (user) => {
             if (user) {
                 window.currentUser = user;
-                window.startDatabaseListener(user.uid);
+                // Start listening to the GLOBAL database for cross-device visibility
+                window.startDatabaseListener();
+                
+                // Update UI with User ID
+                const idEl = document.getElementById('user-id-display');
+                if (idEl) idEl.innerText = user.uid;
             }
         });
     </script>
@@ -205,7 +206,7 @@
             <div class="flex items-center gap-3">
                 <div id="cloud-indicator" class="hidden flex items-center gap-2 px-3 py-1.5 glass rounded-full text-[8px] font-bold text-emerald-400 uppercase tracking-widest mr-2 border-[#bfff00]/20">
                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    Cloud Sync Active
+                    Live Sync
                 </div>
                 <button onclick="toggleZenMode()" class="btn-action" title="Zen Meditation">
                     <i data-lucide="zap" class="w-5 h-5"></i>
@@ -271,12 +272,12 @@
                 </div>
             </div>
 
-            <!-- Persistence Vault -->
+            <!-- Global Vault -->
             <section class="mt-32 w-full">
                 <div class="flex items-end justify-between mb-16 px-2">
                     <div>
                         <h2 class="text-5xl font-black tracking-tighter">VAULT</h2>
-                        <p class="text-xs text-slate-500 mt-2 uppercase tracking-[0.3em]">Cloud secured liquid states</p>
+                        <p class="text-xs text-slate-500 mt-2 uppercase tracking-[0.3em]">Cross-device global synchronization</p>
                     </div>
                     <div class="text-8xl font-black text-white/5 select-none leading-none" id="count">00</div>
                 </div>
@@ -285,7 +286,7 @@
 
                 <div id="empty-state" class="py-32 flex flex-col items-center justify-center opacity-10">
                     <i data-lucide="shield-off" class="w-20 h-20 mb-4"></i>
-                    <p class="text-[10px] font-black uppercase tracking-[0.5em]">No data encrypted</p>
+                    <p class="text-[10px] font-black uppercase tracking-[0.5em]">No data found</p>
                 </div>
             </section>
         </main>
@@ -295,8 +296,12 @@
             <div class="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center opacity-30">
                 <i data-lucide="command" class="w-4 h-4"></i>
             </div>
-            <p class="text-[10px] font-bold text-slate-700 uppercase tracking-[0.6em]">System Version 5.0.0 &bull; YXM Digitals</p>
+            <p class="text-[10px] font-bold text-slate-700 uppercase tracking-[0.6em]">System Version 5.1.0 &bull; YXM.Digitals</p>
             <p class="text-[8px] font-bold text-slate-800 uppercase tracking-[0.4em] -mt-2">Created by Sir Newson</p>
+            <div class="mt-4 px-4 py-2 glass rounded-xl border border-white/5">
+                <p class="text-[7px] text-slate-600 uppercase tracking-widest">Global UID</p>
+                <p id="user-id-display" class="text-[8px] text-slate-500 font-mono tracking-tighter">Authenticating...</p>
+            </div>
         </footer>
 
         <!-- Zen Overlay -->
@@ -381,11 +386,14 @@
 
         /**
          * Database Listener Initiation
+         * Using the PUBLIC path to ensure desktop and mobile see the same data
          */
-        window.startDatabaseListener = (userId) => {
+        window.startDatabaseListener = () => {
             if (!window.db) return;
             const { collection, onSnapshot } = window.firestoreUtils;
-            const palettesRef = collection(window.db, 'artifacts', window.appId, 'users', userId, 'palettes');
+            
+            // Rule 1: Use Public data path for cross-device shared visibility
+            const palettesRef = collection(window.db, 'artifacts', window.appId, 'public', 'data', 'palettes');
             
             onSnapshot(palettesRef, (snapshot) => {
                 const data = [];
@@ -461,28 +469,39 @@
 
             const { doc, setDoc } = window.firestoreUtils;
             const docId = Date.now().toString();
-            const docRef = doc(window.db, 'artifacts', window.appId, 'users', window.currentUser.uid, 'palettes', docId);
+            
+            // Rule 1: Use Public data path
+            const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'palettes', docId);
             
             const entry = { 
                 a: state.colorA, 
                 b: state.colorB, 
                 rot: state.rotation,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                creatorId: window.currentUser.uid // Track creator for local deletion rights
             };
 
             try {
                 await setDoc(docRef, entry);
-                showToast("STATE SYNCED TO VAULT");
+                showToast("SYNCED TO GLOBAL VAULT");
             } catch (error) {
                 console.error("Save failed:", error);
                 showToast("SYNC ERROR");
             }
         }
 
-        async function deletePalette(id) {
+        async function deletePalette(id, creatorId) {
             if (!window.currentUser) return;
+
+            // Optional: Only allow deletion if user created the palette
+            if (creatorId && creatorId !== window.currentUser.uid) {
+                showToast("ACCESS DENIED: CREATOR ONLY");
+                return;
+            }
+            
             const { doc, deleteDoc } = window.firestoreUtils;
-            const docRef = doc(window.db, 'artifacts', window.appId, 'users', window.currentUser.uid, 'palettes', id);
+            const docRef = doc(window.db, 'artifacts', window.appId, 'public', 'data', 'palettes', id);
+            
             try {
                 await deleteDoc(docRef);
                 showToast("ENTRY REMOVED");
@@ -501,6 +520,7 @@
             empty.classList.toggle('hidden', state.palettes.length > 0);
 
             state.palettes.forEach(p => {
+                const isCreator = window.currentUser && p.creatorId === window.currentUser.uid;
                 const card = document.createElement('div');
                 card.className = "group relative flex flex-col p-5 glass rounded-[40px] neon-border transition-all animate-in fade-in zoom-in-95 duration-500";
                 card.innerHTML = `
@@ -511,7 +531,9 @@
                         <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all bg-black/60 backdrop-blur-md gap-3">
                             <button onclick="applyPalette('${p.a}', '${p.b}', ${p.rot})" class="bg-[#bfff00] p-4 rounded-full text-black shadow-2xl hover:scale-110 active:scale-95 transition-all"><i data-lucide="play" class="w-6 h-6"></i></button>
                             <button onclick="exportCSS('${p.a}', '${p.b}', ${p.rot})" class="bg-white/10 p-4 rounded-full text-white shadow-2xl hover:scale-110 active:scale-95 transition-all border border-white/10"><i data-lucide="code" class="w-6 h-6"></i></button>
-                            <button onclick="deletePalette('${p.id}')" class="bg-red-500/80 p-4 rounded-full text-white shadow-2xl hover:scale-110 active:scale-95 transition-all"><i data-lucide="trash-2" class="w-6 h-6"></i></button>
+                            ${isCreator ? `
+                                <button onclick="deletePalette('${p.id}', '${p.creatorId}')" class="bg-red-500/80 p-4 rounded-full text-white shadow-2xl hover:scale-110 active:scale-95 transition-all"><i data-lucide="trash-2" class="w-6 h-6"></i></button>
+                            ` : ''}
                         </div>
                     </div>
                     <div class="flex justify-between items-center px-2">
